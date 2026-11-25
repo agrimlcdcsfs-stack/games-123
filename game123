@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Highway Rush - Car Racing</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#101820;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .wrap{width:min(96vw,520px);text-align:center;padding:14px}
+  h1{margin:4px 0 8px;font-size:clamp(24px,5vw,34px);letter-spacing:2px}
+  .hud{display:flex;justify-content:space-between;gap:10px;margin:10px 0;font-weight:bold}
+  .pill{background:#1e2b36;border:1px solid #34495a;border-radius:10px;padding:9px 13px;flex:1}
+  canvas{width:100%;height:auto;display:block;background:#263238;border:4px solid #52616b;border-radius:12px;box-shadow:0 12px 35px #0008;touch-action:none}
+  .controls{display:flex;justify-content:center;gap:14px;margin:12px 0}
+  button{border:0;border-radius:10px;padding:12px 20px;background:#ffca28;color:#17212b;font-size:16px;font-weight:800;cursor:pointer}
+  button:active{transform:scale(.97)}
+  .hint{color:#c4d0d9;font-size:13px;line-height:1.5;margin:8px}
+  .overlay{position:relative;margin-top:-300px;height:0;pointer-events:none}
+  .panel{pointer-events:auto;display:inline-block;background:#101820ed;border:1px solid #71808b;border-radius:14px;padding:18px 24px;min-width:210px}
+  .panel h2{margin:0 0 8px;color:#ffca28}
+  .panel p{margin:5px 0 12px}
+  @media(max-height:700px){.wrap{padding:6px}.hint{margin:4px}.overlay{margin-top:-260px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏁 HIGHWAY RUSH</h1>
+  <div class="hud">
+    <div class="pill">SCORE: <span id="score">0</span></div>
+    <div class="pill">BEST: <span id="best">0</span></div>
+    <div class="pill">SPEED: <span id="speed">1</span>x</div>
+  </div>
+  <canvas id="game" width="480" height="640" aria-label="Car racing game"></canvas>
+  <div class="overlay" id="overlay">
+    <div class="panel">
+      <h2 id="panelTitle">READY TO RACE?</h2>
+      <p id="panelText">Avoid traffic and beat your best score!</p>
+      <button id="startBtn">START RACE</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="leftBtn">◀ LEFT</button>
+    <button id="rightBtn">RIGHT ▶</button>
+  </div>
+  <div class="hint">Keyboard: ← / → or A / D to steer · Space to start/restart<br>Mobile: use the LEFT and RIGHT buttons</div>
+</div>
+<script>
+(() => {
+ const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+ const scoreEl=document.getElementById('score'),bestEl=document.getElementById('best'),speedEl=document.getElementById('speed');
+ const overlay=document.getElementById('overlay'),titleEl=document.getElementById('panelTitle'),textEl=document.getElementById('panelText'),startBtn=document.getElementById('startBtn');
+ const W=canvas.width,H=canvas.height, road={x:70,w:340};
+ const lanes=[130,240,350];
+ let player={x:240,y:520,w:48,h:86}, traffic=[],score=0,best=0,frame=0,roadOffset=0,running=false,gameOver=false,keys={};
+ try{best=Number(localStorage.getItem('highwayRushBest')||0)}catch(e){}
+ bestEl.textContent=best;
+ function roundedRect(x,y,w,h,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+ function drawCar(x,y,w,h,color,playerCar=false){
+   // shadow and body
+   roundedRect(x+3,y+5,w,h,10,'#0005');
+   roundedRect(x,y,w,h,10,color);
+   roundedRect(x+6,y+13,w-12,h-28,7,playerCar?'#b9e6f5':'#d7e5eb');
+   roundedRect(x+8,y+17,w-16,22,4,'#35566a');
+   roundedRect(x+8,y+47,w-16,15,4,'#35566a');
+   ctx.fillStyle='#fff4b0';ctx.fillRect(x+5,y+5,9,5);ctx.fillRect(x+w-14,y+5,9,5);
+   ctx.fillStyle='#e53935';ctx.fillRect(x+5,y+h-8,9,5);ctx.fillRect(x+w-14,y+h-8,9,5);
+   ctx.fillStyle='#111';ctx.fillRect(x-4,y+16,5,17);ctx.fillRect(x+w-1,y+16,5,17);ctx.fillRect(x-4,y+h-33,5,17);ctx.fillRect(x+w-1,y+h-33,5,17);
+   if(playerCar){ctx.fillStyle='#fff';ctx.font='bold 10px Arial';ctx.textAlign='center';ctx.fillText('YOU',x+w/2,y+h-15)}
+ }
+ function drawRoad(){
+   ctx.fillStyle='#28613d';ctx.fillRect(0,0,W,H);
+   ctx.fillStyle='#30363b';ctx.fillRect(road.x,0,road.w,H);
+   ctx.fillStyle='#f5f5f5';ctx.fillRect(road.x+5,0,5,H);ctx.fillRect(road.x+road.w-10,0,5,H);
+   // lane markers
+   ctx.strokeStyle='#f5f5f5';ctx.lineWidth=5;ctx.setLineDash([34,28]);ctx.lineDashOffset=-roadOffset;
+   ctx.beginPath();ctx.moveTo(road.x+113,0);ctx.lineTo(road.x+113,H);ctx.moveTo(road.x+227,0);ctx.lineTo(road.x+227,H);ctx.stroke();ctx.setLineDash([]);
+   // roadside dashes
+   for(let y=-30+(roadOffset%90);y<H;y+=90){
+     ctx.fillStyle='#f44336';ctx.fillRect(road.x-12,y,8,42);ctx.fillRect(road.x+road.w+4,y,8,42);
+     ctx.fillStyle='#fff';ctx.fillRect(road.x-12,y+21,8,21);ctx.fillRect(road.x+road.w+4,y+21,8,21);
+   }
+ }
+ function draw(){
+   drawRoad();
+   traffic.forEach(c=>drawCar(c.x,c.y,46,82,c.color));
+   drawCar(player.x-player.w/2,player.y,player.w,player.h,'#ffca28',true);
+ }
+ function reset(){
+   player.x=240;traffic=[];score=0;frame=0;roadOffset=0;scoreEl.textContent='0';speedEl.textContent='1';
+   running=true;gameOver=false;overlay.style.display='none';lastTime=0;requestAnimationFrame(loop);
+ }
+ function spawn(){
+   const lane=Math.floor(Math.random()*3);
+   const colors=['#e74c3c','#3498db','#9b59b6','#ecf0f1','#f39c12'];
+   traffic.push({x:lanes[lane]-23,y:-100,color:colors[Math.floor(Math.random()*colors.length)]});
+ }
+ function endGame(){
+   running=false;gameOver=true;
+   if(score>best){best=score;bestEl.textContent=best;try{localStorage.setItem('highwayRushBest',best)}catch(e){}}
+   titleEl.textContent='RACE OVER!';
+   textEl.textContent='Your score: '+score+' · Best: '+best;
+   startBtn.textContent='RACE AGAIN';overlay.style.display='block';
+ }
+ function update(dt){
+   const factor=Math.min(dt/16.67,2.2),speed=5+Math.min(score/180,7);
+   roadOffset=(roadOffset+speed*factor)%90;
+   if(keys.ArrowLeft||keys.a||keys.A)player.x-=6.2*factor;
+   if(keys.ArrowRight||keys.d||keys.D)player.x+=6.2*factor;
+   player.x=Math.max(road.x+34,Math.min(road.x+road.w-34,player.x));
+   frame+=factor;
+   if(frame>Math.max(34,76-score/12)){spawn();frame=0}
+   traffic.forEach(c=>c.y+=speed*factor);
+   traffic=traffic.filter(c=>c.y<H+100);
+   score+=Math.max(0,Math.floor(factor*(speed/5)*0.45));
+   scoreEl.textContent=score;speedEl.textContent=(speed/5).toFixed(1);
+   for(const c of traffic){
+     if(c.y+74>player.y+8&&c.y<player.y+player.h-8&&Math.abs(c.x-player.x)<39){endGame();break}
+   }
+ }
+ let lastTime=0;
+ function loop(t){
+   if(!running)return;
+   const dt=lastTime?Math.min(t-lastTime,40):16.67;lastTime=t;
+   update(dt);draw();
+   if(running)requestAnimationFrame(loop);
+ }
+ function start(){titleEl.textContent='READY TO RACE?';textEl.textContent='Avoid traffic and beat your best score!';startBtn.textContent='START RACE';reset()}
+ startBtn.addEventListener('click',start);
+ document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' ','a','A','d','D'].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.key===' '&&!running)start()});
+ document.addEventListener('keyup',e=>keys[e.key]=false);
+ function holdButton(id,key){const b=document.getElementById(id);b.addEventListener('pointerdown',e=>{e.preventDefault();keys[key]=true;b.setPointerCapture(e.pointerId)});['pointerup','pointercancel','lostpointercapture'].forEach(ev=>b.addEventListener(ev,()=>keys[key]=false))}
+ holdButton('leftBtn','ArrowLeft');holdButton('rightBtn','ArrowRight');
+ canvas.addEventListener('pointerdown',e=>{const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W;keys[x<W/2?'ArrowLeft':'ArrowRight']=true});
+ canvas.addEventListener('pointerup',()=>{keys.ArrowLeft=false;keys.ArrowRight=false});
+ draw();
+})();
+</script>
+</body>
+</html>
